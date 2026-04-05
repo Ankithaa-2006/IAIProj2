@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pydantic
+rapidfuzz
+transformers==4.57.3
+sentencepiece
+torch
+huggingface_hub
+hf_transfer
+safetensors
+accelerate
+
