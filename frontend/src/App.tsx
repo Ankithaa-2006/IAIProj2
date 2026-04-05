@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 type LanguageCode = 'en' | 'hi' | 'kn' | 'ta' | 'ml' | 'te'
+type ThemeMode = 'light' | 'dark'
 
 type LanguageOption = {
   code: LanguageCode
@@ -57,6 +58,7 @@ const sampleText =
   'Please translate this project description clearly. Keep proper nouns, punctuation, and tone consistent.'
 
 function App() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>('light')
   const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>('en')
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>('hi')
   const [text, setText] = useState(sampleText)
@@ -73,6 +75,21 @@ function App() {
       }, {} as Record<LanguageCode, string>),
     [],
   )
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem('theme-mode')
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      setThemeMode(savedTheme)
+      return
+    }
+
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    setThemeMode(prefersDark ? 'dark' : 'light')
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('theme-mode', themeMode)
+  }, [themeMode])
 
   useEffect(() => {
     const loadHealth = async () => {
@@ -94,6 +111,10 @@ function App() {
   const swapLanguages = () => {
     setSourceLanguage(targetLanguage)
     setTargetLanguage(sourceLanguage)
+  }
+
+  const toggleTheme = () => {
+    setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))
   }
 
   const translateText = async () => {
@@ -129,15 +150,25 @@ function App() {
   }
 
   return (
-    <main className="shell">
+    <main className="shell" data-theme={themeMode}>
+      <header className="topbar">
+        <div>
+          <span className="eyebrow">Indian Multilingual Translation</span>
+          <h1 className="title">Translation Studio</h1>
+        </div>
+        <button className="theme-toggle" type="button" onClick={toggleTheme}>
+          {themeMode === 'dark' ? 'Light mode' : 'Dark mode'}
+        </button>
+      </header>
+
       <section className="hero-panel">
         <div className="hero-copy">
-          <span className="eyebrow">Hybrid multilingual translation lab</span>
-          <h1>Improve lighter translation models with candidate reranking.</h1>
+          <span className="eyebrow">Model-first pipeline</span>
+          <h2>Translate across six Indian languages with ranked candidates.</h2>
           <p className="lede">
-            This project translates between English, Kannada, Tamil, Malayalam,
-            Telugu, and Hindi using a lightweight multilingual model,
-            heuristic ranking, terminology memory, and fallback retries.
+            This UI uses direct TranslateGemma inference, generates multiple
+            candidates, scores each output, and selects the strongest
+            translation for the requested language pair.
           </p>
 
           <div className="status-row">
@@ -334,10 +365,10 @@ function App() {
 
       <section className="footer-note glass">
         <div>
-          <span className="eyebrow">Implementation plan</span>
+          <span className="eyebrow">Architecture</span>
           <p>
-            Lightweight multilingual model support, candidate reranking,
-            glossary-backed fallback, and full UI/API separation.
+            Model-only inference, candidate reranking, and clean API/UI
+            separation with deployment-ready structure.
           </p>
         </div>
       </section>

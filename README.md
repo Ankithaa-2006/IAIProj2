@@ -22,7 +22,12 @@ The backend uses `google/translategemma-4b-it` directly for inference. Glossary-
 
 - `backend/`: FastAPI service and translation pipeline
 - `frontend/`: React + Vite UI
-- `Indian_Multilingual_Translation_Project_Synopsis.md`: architecture notes and design document
+
+## UI
+
+- Minimalist interface with light/dark mode toggle
+- Clear source/target controls and candidate diagnostics
+- Works on desktop and mobile layouts
 
 ## Run Backend
 
@@ -106,3 +111,26 @@ Validated in this workspace run:
 
 - The model currently runs on CPU in this environment; GPU will improve latency significantly.
 - Terminal output may show garbled Indic characters due console encoding. API/UI output remains valid Unicode.
+
+## Future Steps
+
+1. Add GPU deployment profile with automatic `torch_dtype` and memory-aware generation settings.
+2. Add server-side caching for repeated source-target pairs to reduce latency.
+3. Add automated regression suite that runs all directed language pairs on every release.
+4. Add translation quality dashboards (BLEU/chrF + human review snapshots).
+5. Add containerized deployment (`Dockerfile` + production compose) for one-command startup.
+
+## Model Weights and GitHub
+
+The current model shards are very large. Pushing them directly into a normal GitHub repo is not practical due platform limits.
+
+- Normal GitHub Git storage limit per file: 100 MB (hard block)
+- Git LFS also has per-file and quota constraints, and these shards are multi-GB
+
+Practical no-wait distribution options are:
+
+1. Publish a prebuilt runtime image (container/VM) that already contains model weights.
+2. Host weights on Hugging Face (current source of truth) and mirror to fast object storage/CDN near users.
+3. Split and package model shards into release assets with reassembly step (more operational overhead).
+
+If you want, the next pass can implement option 1 with a deployment image so users run immediately without a separate model download step.
