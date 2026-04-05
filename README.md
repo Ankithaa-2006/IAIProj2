@@ -69,6 +69,60 @@ Open:
 
 - `http://127.0.0.1:5173`
 
+## Deployment Without First-Run Model Download
+
+This repository now includes container deployment that preloads model weights at image build time.
+
+Files added:
+
+- `backend/Dockerfile`
+- `frontend/Dockerfile`
+- `deploy/nginx.conf`
+- `docker-compose.yml`
+- `.dockerignore`
+
+### Build and Run (Local Docker)
+
+Prerequisites:
+
+1. Docker Desktop running
+2. Access token accepted for `google/translategemma-4b-it`
+
+PowerShell:
+
+```powershell
+$env:HF_TOKEN = "your_hf_token_here"
+docker compose build
+docker compose up -d
+```
+
+Open:
+
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:8000/api/health`
+
+### Publish Preloaded Image (Example: GHCR)
+
+This is the practical replacement for "pushing model weights to GitHub repo". Instead of committing multi-GB shards to Git, publish a preloaded container image.
+
+```powershell
+# Login to GHCR
+echo $env:GITHUB_TOKEN | docker login ghcr.io -u <github-username> --password-stdin
+
+# Build backend image with model included
+$env:HF_TOKEN = "your_hf_token_here"
+docker build -f backend/Dockerfile -t ghcr.io/<owner>/iai-translation-backend:latest --build-arg HF_TOKEN=$env:HF_TOKEN .
+
+# Build frontend image
+docker build -f frontend/Dockerfile -t ghcr.io/<owner>/iai-translation-frontend:latest .
+
+# Push
+docker push ghcr.io/<owner>/iai-translation-backend:latest
+docker push ghcr.io/<owner>/iai-translation-frontend:latest
+```
+
+Users can then run your images directly, with no first-run model download delay.
+
 ## API Endpoints
 
 - `GET /api/health`
@@ -118,7 +172,7 @@ Validated in this workspace run:
 2. Add server-side caching for repeated source-target pairs to reduce latency.
 3. Add automated regression suite that runs all directed language pairs on every release.
 4. Add translation quality dashboards (BLEU/chrF + human review snapshots).
-5. Add containerized deployment (`Dockerfile` + production compose) for one-command startup.
+5. Add CI workflow to build/publish preloaded images to GHCR on tagged releases.
 
 ## Model Weights and GitHub
 

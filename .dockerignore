@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+.hf-cache
+.offload
+
+**/__pycache__/
+**/*.pyc
+
+backend/logs/
+frontend/node_modules/
+frontend/dist/
