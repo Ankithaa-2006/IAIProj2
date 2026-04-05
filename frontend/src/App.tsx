@@ -57,6 +57,12 @@ const languageOptions: LanguageOption[] = [
 const sampleText =
   'Please translate this project description clearly. Keep proper nouns, punctuation, and tone consistent.'
 
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+
+function apiUrl(path: string): string {
+  return apiBaseUrl ? `${apiBaseUrl}${path}` : path
+}
+
 function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('light')
   const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>('en')
@@ -94,7 +100,7 @@ function App() {
   useEffect(() => {
     const loadHealth = async () => {
       try {
-        const response = await fetch('/api/health')
+        const response = await fetch(apiUrl('/api/health'))
         if (!response.ok) {
           throw new Error('Health check failed')
         }
@@ -122,7 +128,7 @@ function App() {
     setError(null)
 
     try {
-      const response = await fetch('/api/translate', {
+      const response = await fetch(apiUrl('/api/translate'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

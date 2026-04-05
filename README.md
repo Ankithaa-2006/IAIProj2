@@ -123,6 +123,50 @@ docker push ghcr.io/<owner>/iai-translation-frontend:latest
 
 Users can then run your images directly, with no first-run model download delay.
 
+### Automated GHCR Publishing (GitHub Actions)
+
+Workflow file:
+
+- `.github/workflows/publish-images-ghcr.yml`
+
+Triggers:
+
+1. Manual dispatch
+2. Push tag matching `v*`
+
+Required repository secret:
+
+1. `HF_TOKEN` (must have access to `google/translategemma-4b-it`)
+
+Result:
+
+1. Publishes backend and frontend images to GHCR as `latest` and tag-versioned images.
+
+## Vercel Website Setup
+
+This project deploys the frontend to Vercel and points API calls to your backend URL.
+
+Files added:
+
+1. `.github/workflows/deploy-frontend-vercel.yml`
+2. `frontend/vercel.json`
+3. `frontend/.env.example`
+
+### One-time Vercel Project Setup
+
+1. Import this GitHub repository into Vercel.
+2. Set Root Directory to `frontend`.
+3. Add environment variable `VITE_API_BASE_URL` to your deployed backend URL (for example, `https://your-backend-domain.com`).
+
+### Required GitHub Secrets for Auto-Deploy Workflow
+
+1. `VERCEL_TOKEN`
+2. `VERCEL_ORG_ID`
+3. `VERCEL_PROJECT_ID`
+4. `VITE_API_BASE_URL`
+
+After these are set, pushes to `master` that affect `frontend/**` will auto-deploy the site to Vercel.
+
 ## API Endpoints
 
 - `GET /api/health`
