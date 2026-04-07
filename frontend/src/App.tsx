@@ -133,8 +133,6 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [themeMode, setThemeMode] = useState<ThemeMode>('light')
-  const [maxCandidates, setMaxCandidates] = useState(3)
-  const [showAllCandidates, setShowAllCandidates] = useState(false)
   const [languageMenuOpen, setLanguageMenuOpen] = useState<'source' | 'target' | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -274,7 +272,7 @@ function App() {
           text,
           source_language: sourceLanguage,
           target_language: targetLanguage,
-          max_candidates: maxCandidates,
+          max_candidates: 3,
         }),
       })
 
@@ -285,7 +283,6 @@ function App() {
 
       const payload = (await apiResponse.json()) as TranslationResponse
       setResponse(payload)
-      setShowAllCandidates(false)
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : 'Translation failed')
     } finally {
@@ -385,7 +382,15 @@ function App() {
               {languageMenuOpen === 'source' ? (
                 <div className="language-menu">
                   {languages.map((language) => (
-                    <button key={language.code} className={language.code === sourceLanguage ? 'language-menu-item active' : 'language-menu-item'} type="button" onClick={() => selectLanguage(language.code)}>
+                    <button
+                      key={language.code}
+                      className={language.code === sourceLanguage ? 'language-menu-item active' : 'language-menu-item'}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        selectLanguage(language.code)
+                      }}
+                    >
                       <span>{language.label}</span>
                       <small>{language.script}</small>
                     </button>
@@ -406,26 +411,21 @@ function App() {
               {languageMenuOpen === 'target' ? (
                 <div className="language-menu">
                   {languages.map((language) => (
-                    <button key={language.code} className={language.code === targetLanguage ? 'language-menu-item active' : 'language-menu-item'} type="button" onClick={() => selectLanguage(language.code)}>
+                    <button
+                      key={language.code}
+                      className={language.code === targetLanguage ? 'language-menu-item active' : 'language-menu-item'}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        selectLanguage(language.code)
+                      }}
+                    >
                       <span>{language.label}</span>
                       <small>{language.script}</small>
                     </button>
                   ))}
                 </div>
               ) : null}
-            </div>
-          </div>
-
-          <div className="candidates-stepper-row">
-            <span>Candidates</span>
-            <div className="stepper" aria-label="Maximum candidates">
-              <button type="button" onClick={() => setMaxCandidates((current) => Math.max(1, current - 1))} aria-label="Decrease candidates">
-                −
-              </button>
-              <span>{maxCandidates}</span>
-              <button type="button" onClick={() => setMaxCandidates((current) => Math.min(5, current + 1))} aria-label="Increase candidates">
-                +
-              </button>
             </div>
           </div>
 
@@ -501,27 +501,21 @@ function App() {
 
                 {response.retry_used ? <div className="retry-note-inline">Retry was used to improve this result</div> : null}
 
-                <button className="candidate-toggle" type="button" onClick={() => setShowAllCandidates((current) => !current)}>
-                  {showAllCandidates ? 'Hide all candidates' : 'Show all candidates'}
-                </button>
-
-                {showAllCandidates ? (
-                  <div className="candidate-list">
-                    {response.candidates.map((candidate) => {
-                      const isActive = candidate.candidate_id === response.selected_candidate.candidate_id
-                      return (
-                        <div key={candidate.candidate_id} className={isActive ? 'candidate-row active' : 'candidate-row'}>
-                          <div className="candidate-top">
-                            <span>{candidate.strategy}</span>
-                            <span className="candidate-score">{candidate.score.toFixed(2)}</span>
-                          </div>
-                          <p className="candidate-text">{candidate.text}</p>
-                          <div className="candidate-notes">{candidate.notes.join(', ')}</div>
+                <div className="candidate-list">
+                  {response.candidates.map((candidate) => {
+                    const isActive = candidate.candidate_id === response.selected_candidate.candidate_id
+                    return (
+                      <div key={candidate.candidate_id} className={isActive ? 'candidate-row active' : 'candidate-row'}>
+                        <div className="candidate-top">
+                          <span>{candidate.strategy}</span>
+                          <span className="candidate-score">{candidate.score.toFixed(2)}</span>
                         </div>
-                      )
-                    })}
-                  </div>
-                ) : null}
+                        <p className="candidate-text">{candidate.text}</p>
+                        <div className="candidate-notes">{candidate.notes.join(', ')}</div>
+                      </div>
+                    )
+                  })}
+                </div>
               </>
             ) : (
               <div className="empty-state">Translation will appear here</div>
