@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ class ModelAdapter:
         self.preprocessor = TextPreprocessor()
         self._status = "initializing; model inference path"
         self._model_bundle: Any | None = None
+        self._logger = logging.getLogger("backend.model_adapter")
 
     @property
     def status(self) -> str:
@@ -41,6 +43,9 @@ class ModelAdapter:
         Path(settings.offload_dir).mkdir(parents=True, exist_ok=True)
         os.environ["HF_HOME"] = settings.hf_cache_dir
         os.environ["TRANSFORMERS_CACHE"] = settings.hf_cache_dir
+        token = self._token()
+        if token:
+            os.environ["HUGGINGFACE_HUB_TOKEN"] = token
         if settings.use_hf_transfer:
             os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
             os.environ["HF_HUB_DISABLE_XET"] = "1"
@@ -91,33 +96,67 @@ class ModelAdapter:
                 f"model artifacts not ready locally for {model_id}; "
                 "cannot run translation until artifacts are present"
             )
-            return None
+            self._logger.warning(self._status)
+        else:
+            try:
+                if settings.model_mode == "translategemma-image-text-to-text":
+                    self._model_bundle = self._load_translategemma_bundle(model_id)
+                    return self._model_bundle
+                if settings.model_mode == "nllb-text-to-text":
+                    self._model_bundle = self._load_nllb_bundle(model_id)
+                    return self._model_bundle
+                raise ValueError(f"Unsupported model mode: {settings.model_mode}")
+            except Exception as exc:  # noqa: BLE001
+                self._status = self._describe_model_load_failure(settings.model_mode, exc)
+                self._logger.exception("Primary model load failed")
 
-        try:
-            if settings.model_mode == "translategemma-image-text-to-text":
-                self._model_bundle = self._load_translategemma_bundle(model_id)
+        fallback_id = settings.fallback_model_id
+        if fallback_id:
+            try:
+                self._model_bundle = self._load_nllb_bundle(fallback_id)
+                self._status = (
+                    f"loaded fallback {fallback_id} after failure "
+                    f"(primary={settings.model_id})"
+                )
                 return self._model_bundle
-            raise ValueError(f"Unsupported model mode: {settings.model_mode}")
-        except Exception as exc:  # noqa: BLE001
-            self._status = (
-                f"model load failure "
-                f"(mode={settings.model_mode}, error={exc.__class__.__name__}: {exc})"
-            )
-            return None
+            except Exception as exc:  # noqa: BLE001
+                self._status = self._describe_model_load_failure("nllb-text-to-text", exc)
+                self._logger.exception("Fallback model load failed")
+
+        return None
+
+    def _describe_model_load_failure(self, mode: str, exc: Exception) -> str:
+        try:
+            from huggingface_hub.utils import GatedRepoError, HfHubHTTPError
+
+            if isinstance(exc, GatedRepoError):
+                return (
+                    f"hf auth failure (mode={mode}, gated repo access denied); "
+                    "verify HF_TOKEN has access to the model"
+                )
+            if isinstance(exc, HfHubHTTPError):
+                status = getattr(exc.response, "status_code", "unknown")
+                if status in {401, 403}:
+                    return (
+                        f"hf auth failure (mode={mode}, status={status}); "
+                        "verify HF_TOKEN has access to the model"
+                    )
+        except Exception:  # noqa: BLE001
+            pass
+        return f"model load failure (mode={mode}, error={exc.__class__.__name__}: {exc})"
 
     def _load_translategemma_bundle(self, model_id: str) -> Any:
         import torch
         from transformers import AutoModelForImageTextToText, AutoProcessor
 
         token = self._token()
+        use_cuda = torch.cuda.is_available()
         model_kwargs: dict[str, Any] = {
             "use_safetensors": settings.use_safetensors,
             "cache_dir": settings.hf_cache_dir,
-            "device_map": "auto",
-            "low_cpu_mem_usage": True,
+            "device_map": None,
+            "low_cpu_mem_usage": False,
             "torch_dtype": "auto",
-            "offload_folder": settings.offload_dir,
-            "offload_state_dict": True,
         }
         if token:
             model_kwargs["token"] = token
@@ -142,6 +181,82 @@ class ModelAdapter:
             "model": model,
         }
 
+    def _load_nllb_bundle(self, model_id: str) -> Any:
+        import torch
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+        token = self._token()
+        use_cuda = torch.cuda.is_available()
+        model_kwargs: dict[str, Any] = {
+            "use_safetensors": settings.use_safetensors,
+            "cache_dir": settings.hf_cache_dir,
+            "torch_dtype": "auto",
+        }
+        if use_cuda:
+            model_kwargs.update(
+                {
+                    "device_map": "auto",
+                    "low_cpu_mem_usage": True,
+                    "offload_folder": settings.offload_dir,
+                    "offload_state_dict": True,
+                }
+            )
+        else:
+            # Keep CPU loading simple; passing device_map="cpu" can route through
+            # accelerate dispatch and trigger meta-tensor move errors.
+            model_kwargs["low_cpu_mem_usage"] = False
+        if token:
+            model_kwargs["token"] = token
+        if settings.fallback_require_local_model_files:
+            model_kwargs["local_files_only"] = True
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            token=token,
+            cache_dir=settings.hf_cache_dir,
+            local_files_only=settings.fallback_require_local_model_files,
+        )
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id, **model_kwargs)
+        device = self._model_primary_device(model)
+        self._status = (
+            f"loaded {model_id} in mode=nllb-text-to-text on {device}; "
+            f"safetensors={settings.use_safetensors}; hf_transfer={settings.use_hf_transfer}"
+        )
+        return {
+            "kind": "nllb",
+            "tokenizer": tokenizer,
+            "model": model,
+        }
+
+    def _model_primary_device(self, model: Any) -> str:
+        try:
+            import torch
+
+            device = getattr(model, "device", None)
+            if device is not None and str(device) != "meta":
+                return str(device)
+
+            hf_device_map = getattr(model, "hf_device_map", None)
+            if isinstance(hf_device_map, dict):
+                for mapped in hf_device_map.values():
+                    if isinstance(mapped, int):
+                        return f"cuda:{mapped}"
+                    if isinstance(mapped, str) and mapped not in {"cpu", "disk", "meta"}:
+                        return mapped
+
+            for param in model.parameters():
+                param_device = str(param.device)
+                if param_device != "meta":
+                    return param_device
+
+            first_param = next(model.parameters(), None)
+            if first_param is not None:
+                return str(first_param.device)
+
+            return str(torch.device("cpu"))
+        except Exception:  # noqa: BLE001
+            return "cpu"
+
     def translate(self, text: str, source_language: str, target_language: str, strategy: str) -> tuple[str, float]:
         text = self.preprocessor.normalize(text)
         model_bundle = self._load_model()
@@ -151,6 +266,8 @@ class ModelAdapter:
         kind = model_bundle.get("kind")
         if kind == "translategemma":
             return self._translate_with_translategemma(model_bundle, text, source_language, target_language, strategy)
+        if kind == "nllb":
+            return self._translate_with_nllb(model_bundle, text, source_language, target_language, strategy)
 
         self._status = f"model bundle failure (unsupported bundle kind={kind})"
         raise RuntimeError(self._status)
@@ -221,6 +338,54 @@ class ModelAdapter:
                 f"translategemma inference failure "
                 f"(error={exc.__class__.__name__}: {exc})"
             )
+            raise RuntimeError(self._status) from exc
+
+    def _translate_with_nllb(
+        self,
+        model_bundle: dict[str, Any],
+        text: str,
+        source_language: str,
+        target_language: str,
+        strategy: str,
+    ) -> tuple[str, float]:
+        try:
+            import torch
+
+            tokenizer = model_bundle["tokenizer"]
+            model = model_bundle["model"]
+            source_code = self.registry.get(source_language).nllb_code
+            target_code = self.registry.get(target_language).nllb_code
+
+            tokenizer.src_lang = source_code
+            inputs = tokenizer(text, return_tensors="pt")
+            runtime_device = torch.device(self._model_primary_device(model))
+            inputs = {key: value.to(runtime_device) for key, value in inputs.items()}
+
+            generation_args: dict[str, Any] = {
+                "max_new_tokens": 256,
+                "return_dict_in_generate": True,
+                "output_scores": True,
+                "forced_bos_token_id": tokenizer.convert_tokens_to_ids(target_code),
+            }
+            if strategy == "beam":
+                generation_args.update({"num_beams": 3, "repetition_penalty": 1.08})
+            elif strategy == "sample":
+                generation_args.update({"do_sample": True, "top_p": 0.92, "temperature": 0.75})
+            elif strategy == "strict":
+                generation_args.update({"num_beams": 4, "length_penalty": 1.0, "repetition_penalty": 1.1})
+            else:
+                generation_args.update({"num_beams": 1})
+
+            output = model.generate(**inputs, **generation_args)
+            decoded = tokenizer.batch_decode(output.sequences, skip_special_tokens=True)[0].strip()
+            if not decoded:
+                self._status = "nllb inference failure (empty decoded output)"
+                raise RuntimeError(self._status)
+
+            confidence = self._estimate_confidence(output.scores)
+            return decoded, confidence
+        except Exception as exc:  # noqa: BLE001
+            self._status = f"nllb inference failure (error={exc.__class__.__name__}: {exc})"
             raise RuntimeError(self._status) from exc
 
     def _estimate_confidence(self, scores: list[Any]) -> float:

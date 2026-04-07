@@ -1,12 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-type LanguageCode = 'en' | 'hi' | 'kn' | 'ta' | 'ml' | 'te'
 type ThemeMode = 'light' | 'dark'
 
-type LanguageOption = {
-  code: LanguageCode
+type LanguageMeta = {
+  code: string
   label: string
+  nllb_code: string
+  script: string
+}
+
+type HealthResponse = {
+  status: string
+  model_status: string
+  mode: string
+  safetensors: boolean
+  hf_transfer: boolean
 }
 
 type CandidateBreakdown = {
@@ -29,58 +38,122 @@ type TranslationCandidate = {
 }
 
 type TranslationResponse = {
-  source_language: LanguageCode
-  target_language: LanguageCode
+  source_language: string
+  target_language: string
   pair_label: string
   input_text: string
   selected_candidate: TranslationCandidate
   candidates: TranslationCandidate[]
   model_status: string
   retry_used: boolean
-  diagnostics: Record<string, unknown>
+  diagnostics: {
+    candidate_count: number
+    selected_strategy: string
+    selected_total_score: number
+    selected_confidence: number
+  }
 }
 
-type HealthResponse = {
-  status: string
-  model_status: string
-}
+const sampleText = 'Please translate this sentence into a natural Indian-language form.'
 
-const languageOptions: LanguageOption[] = [
-  { code: 'en', label: 'English' },
-  { code: 'hi', label: 'Hindi' },
-  { code: 'kn', label: 'Kannada' },
-  { code: 'ta', label: 'Tamil' },
-  { code: 'ml', label: 'Malayalam' },
-  { code: 'te', label: 'Telugu' },
-]
-
-const sampleText =
-  'Please translate this project description clearly. Keep proper nouns, punctuation, and tone consistent.'
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const configuredApiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
+const apiBaseUrl = configuredApiBase ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 function apiUrl(path: string): string {
   return apiBaseUrl ? `${apiBaseUrl}${path}` : path
 }
 
+function SunIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M12 2.5v2.3M12 19.2v2.3M4.8 4.8l1.6 1.6M17.6 17.6l1.6 1.6M2.5 12h2.3M19.2 12h2.3M4.8 19.2l1.6-1.6M17.6 6.4l1.6-1.6" />
+    </svg>
+  )
+}
+
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M16.5 14.8A7.2 7.2 0 0 1 9.2 7.5c0-1.2.3-2.3.8-3.3A8.4 8.4 0 1 0 19.7 17c-1.1-.4-2.2-.9-3.2-2.2Z" />
+    </svg>
+  )
+}
+
+function SwapIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 7h10l-2.5-2.5M17 17H7l2.5 2.5" />
+    </svg>
+  )
+}
+
+function SpinnerIcon() {
+  return <span className="spinner-icon" aria-hidden="true" />
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 9.5V7.2A2.2 2.2 0 0 1 11.2 5h5.6A2.2 2.2 0 0 1 19 7.2v5.6a2.2 2.2 0 0 1-2.2 2.2h-2.3" />
+      <path d="M13 9H7.2A2.2 2.2 0 0 0 5 11.2v5.6A2.2 2.2 0 0 0 7.2 19h5.6a2.2 2.2 0 0 0 2.2-2.2V11.4" />
+    </svg>
+  )
+}
+
+function SpeakIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M11 6 7.5 9H5v6h2.5L11 18V6Z" />
+      <path d="M14.5 9.5a4 4 0 0 1 0 5" />
+      <path d="M17 7a7 7 0 0 1 0 10" />
+    </svg>
+  )
+}
+
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8.5 13.5 15.5 18" />
+      <path d="M15.5 6 8.5 10.5" />
+      <circle cx="6.5" cy="12" r="2" />
+      <circle cx="17.5" cy="6" r="2" />
+      <circle cx="17.5" cy="18" r="2" />
+    </svg>
+  )
+}
+
 function App() {
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light')
-  const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>('en')
-  const [targetLanguage, setTargetLanguage] = useState<LanguageCode>('hi')
+  const [languages, setLanguages] = useState<LanguageMeta[]>([])
+  const [health, setHealth] = useState<HealthResponse | null>(null)
+  const [sourceLanguage, setSourceLanguage] = useState<string>('')
+  const [targetLanguage, setTargetLanguage] = useState<string>('')
   const [text, setText] = useState(sampleText)
   const [response, setResponse] = useState<TranslationResponse | null>(null)
-  const [health, setHealth] = useState<HealthResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [themeMode, setThemeMode] = useState<ThemeMode>('light')
+  const [maxCandidates, setMaxCandidates] = useState(3)
+  const [showAllCandidates, setShowAllCandidates] = useState(false)
+  const [languageMenuOpen, setLanguageMenuOpen] = useState<'source' | 'target' | null>(null)
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
 
-  const selectedLanguages = useMemo(
-    () =>
-      languageOptions.reduce<Record<LanguageCode, string>>((accumulator, item) => {
-        accumulator[item.code] = item.label
-        return accumulator
-      }, {} as Record<LanguageCode, string>),
-    [],
-  )
+  const languageControlsRef = useRef<HTMLDivElement | null>(null)
+  const infoRef = useRef<HTMLDivElement | null>(null)
+
+  const languageByCode = useMemo(() => {
+    return languages.reduce<Record<string, LanguageMeta>>((accumulator, language) => {
+      accumulator[language.code] = language
+      return accumulator
+    }, {})
+  }, [languages])
+
+  const sourceLanguageMeta = sourceLanguage ? languageByCode[sourceLanguage] : undefined
+  const targetLanguageMeta = targetLanguage ? languageByCode[targetLanguage] : undefined
+  const outputText = response?.selected_candidate.text ?? ''
+  const wordCount = useMemo(() => text.trim().split(/\s+/).filter(Boolean).length, [text])
+  const characterCount = text.length
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem('theme-mode')
@@ -98,29 +171,95 @@ function App() {
   }, [themeMode])
 
   useEffect(() => {
-    const loadHealth = async () => {
+    const loadData = async () => {
       try {
-        const response = await fetch(apiUrl('/api/health'))
-        if (!response.ok) {
-          throw new Error('Health check failed')
+        const [languagesResponse, healthResponse] = await Promise.all([
+          fetch(apiUrl('/api/languages')),
+          fetch(apiUrl('/api/health')),
+        ])
+
+        if (languagesResponse.ok) {
+          const payload = (await languagesResponse.json()) as { languages: LanguageMeta[] }
+          setLanguages(payload.languages ?? [])
         }
-        const data = (await response.json()) as HealthResponse
-        setHealth(data)
+
+        if (healthResponse.ok) {
+          const payload = (await healthResponse.json()) as HealthResponse
+          setHealth(payload)
+        } else {
+          setHealth({ status: 'offline', model_status: 'backend unavailable', mode: 'unknown', safetensors: false, hf_transfer: false })
+        }
       } catch {
-        setHealth({ status: 'offline', model_status: 'backend unavailable' })
+        setHealth({ status: 'offline', model_status: 'backend unavailable', mode: 'unknown', safetensors: false, hf_transfer: false })
       }
     }
 
-    void loadHealth()
+    void loadData()
   }, [])
+
+  useEffect(() => {
+    if (languages.length === 0) {
+      return
+    }
+
+    setSourceLanguage((current) => current && languages.some((language) => language.code === current) ? current : (languages.find((language) => language.code === 'en')?.code ?? languages[0]?.code ?? ''))
+    setTargetLanguage((current) => {
+      if (current && languages.some((language) => language.code === current)) {
+        return current
+      }
+
+      const preferredTarget = languages.find((language) => language.code === 'hi')?.code
+      const fallbackTarget = languages.find((language) => language.code !== sourceLanguage)?.code ?? languages[1]?.code ?? languages[0]?.code ?? ''
+      return preferredTarget ?? fallbackTarget
+    })
+  }, [languages, sourceLanguage])
+
+  useEffect(() => {
+    if (!languageMenuOpen && !infoOpen) {
+      return undefined
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const targetNode = event.target as Node
+      if (languageMenuOpen && languageControlsRef.current && !languageControlsRef.current.contains(targetNode)) {
+        setLanguageMenuOpen(null)
+      }
+      if (infoOpen && infoRef.current && !infoRef.current.contains(targetNode)) {
+        setInfoOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [languageMenuOpen, infoOpen])
+
+  useEffect(() => {
+    if (!copied) {
+      return undefined
+    }
+
+    const timer = window.setTimeout(() => setCopied(false), 1600)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const openLanguageMenu = (mode: 'source' | 'target') => {
+    setLanguageMenuOpen((current) => (current === mode ? null : mode))
+  }
+
+  const selectLanguage = (code: string) => {
+    if (languageMenuOpen === 'source') {
+      setSourceLanguage(code)
+    } else if (languageMenuOpen === 'target') {
+      setTargetLanguage(code)
+    }
+    setLanguageMenuOpen(null)
+    setResponse(null)
+  }
 
   const swapLanguages = () => {
     setSourceLanguage(targetLanguage)
     setTargetLanguage(sourceLanguage)
-  }
-
-  const toggleTheme = () => {
-    setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))
+    setResponse(null)
   }
 
   const translateText = async () => {
@@ -128,255 +267,283 @@ function App() {
     setError(null)
 
     try {
-      const response = await fetch(apiUrl('/api/translate'), {
+      const apiResponse = await fetch(apiUrl('/api/translate'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
           source_language: sourceLanguage,
           target_language: targetLanguage,
-          max_candidates: 3,
+          max_candidates: maxCandidates,
         }),
       })
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null
-        throw new Error(payload?.detail ?? 'Translation request failed')
+      if (!apiResponse.ok) {
+        const payload = (await apiResponse.json().catch(() => null)) as { detail?: string } | null
+        throw new Error(payload?.detail ?? 'Translation failed')
       }
 
-      const data = (await response.json()) as TranslationResponse
-      setResponse(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      const payload = (await apiResponse.json()) as TranslationResponse
+      setResponse(payload)
+      setShowAllCandidates(false)
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : 'Translation failed')
     } finally {
       setLoading(false)
     }
   }
 
+  const copyTranslation = async () => {
+    if (!outputText) {
+      return
+    }
+
+    await navigator.clipboard.writeText(outputText)
+    setCopied(true)
+  }
+
+  const speakTranslation = () => {
+    if (!outputText || !('speechSynthesis' in window)) {
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(outputText)
+    utterance.lang = targetLanguage === 'hi' ? 'hi-IN' : 'en-IN'
+    window.speechSynthesis.speak(utterance)
+  }
+
+  const shareTranslation = async () => {
+    if (!outputText) {
+      return
+    }
+
+    if (navigator.share) {
+      await navigator.share({
+        title: 'Vakya',
+        text: outputText,
+        url: window.location.href,
+      })
+      return
+    }
+
+    await navigator.clipboard.writeText(outputText)
+    setCopied(true)
+  }
+
+  const apiOnline = health?.status === 'ok'
+
   return (
-    <main className="shell" data-theme={themeMode}>
+    <main className={`shell theme-${themeMode}`}>
       <header className="topbar">
-        <div>
-          <span className="eyebrow">Indian Multilingual Translation</span>
-          <h1 className="title">Translation Studio</h1>
+        <div className="brand-block">
+          <span className="site-name">Vakya</span>
         </div>
-        <button className="theme-toggle" type="button" onClick={toggleTheme}>
-          {themeMode === 'dark' ? 'Light mode' : 'Dark mode'}
-        </button>
+
+        <div className="topbar-right" ref={infoRef}>
+          <div className={apiOnline ? 'status-chip status-online' : 'status-chip status-offline'}>
+            <span className="status-dot" />
+            <span>{apiOnline ? 'API online' : 'API offline'}</span>
+          </div>
+          <button className="icon-button theme-button" type="button" onClick={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))} aria-label="Toggle theme">
+            {themeMode === 'dark' ? <SunIcon /> : <MoonIcon />}
+          </button>
+          <button className="icon-button info-button" type="button" onClick={() => setInfoOpen((current) => !current)} aria-label="Show API information">
+            ⓘ
+          </button>
+          {infoOpen ? (
+            <div className="header-info" role="note">
+              <span>
+                mode <code>{health?.mode ?? 'unknown'}</code>
+              </span>
+              <span>
+                safetensors <code>{health ? String(health.safetensors) : 'false'}</code>
+              </span>
+              <span>
+                hf_transfer <code>{health ? String(health.hf_transfer) : 'false'}</code>
+              </span>
+            </div>
+          ) : null}
+        </div>
       </header>
 
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <span className="eyebrow">Model-first pipeline</span>
-          <h2>Translate across six Indian languages with ranked candidates.</h2>
-          <p className="lede">
-            This UI uses direct TranslateGemma inference, generates multiple
-            candidates, scores each output, and selects the strongest
-            translation for the requested language pair.
-          </p>
-
-          <div className="status-row">
-            <div className="status-card">
-              <span>API</span>
-              <strong>{health?.status ?? 'checking...'}</strong>
-            </div>
-            <div className="status-card">
-              <span>Model</span>
-              <strong>{health?.model_status ?? 'loading...'}</strong>
-            </div>
-            <div className="status-card">
-              <span>Scope</span>
-              <strong>Any-to-any pairs</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="hero-card glass">
-          <div className="hero-card-header">
-            <span>Pipeline</span>
-            <strong>Model → Candidates → Heuristics → Retry</strong>
-          </div>
-          <div className="pipeline-steps">
-            <div>
-              <span>1</span>
-              <p>Normalize input</p>
-            </div>
-            <div>
-              <span>2</span>
-              <p>Generate multiple translations</p>
-            </div>
-            <div>
-              <span>3</span>
-              <p>Score with quality checks</p>
-            </div>
-            <div>
-              <span>4</span>
-              <p>Select the strongest result</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section className="workspace">
-        <div className="panel composer glass">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Translator</span>
-              <h2>Enter text and choose languages</h2>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => setText(sampleText)}>
+        <article className="panel panel-input">
+          <div className="panel-head">
+            <span className="panel-title">Input</span>
+            <button className="load-sample" type="button" onClick={() => setText(sampleText)}>
               Load sample
             </button>
           </div>
 
-          <div className="controls">
-            <label>
-              <span>Source language</span>
-              <select value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value as LanguageCode)}>
-                {languageOptions.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="language-controls" ref={languageControlsRef}>
+            <div className="language-picker">
+              <button className="language-pill" type="button" onClick={() => openLanguageMenu('source')}>
+                <span className="pill-label">{sourceLanguageMeta?.label ?? 'Select language'}</span>
+                <span className="pill-script">{sourceLanguageMeta?.script ?? 'script'}</span>
+              </button>
+              {languageMenuOpen === 'source' ? (
+                <div className="language-menu">
+                  {languages.map((language) => (
+                    <button key={language.code} className={language.code === sourceLanguage ? 'language-menu-item active' : 'language-menu-item'} type="button" onClick={() => selectLanguage(language.code)}>
+                      <span>{language.label}</span>
+                      <small>{language.script}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
-            <button className="swap-button" type="button" onClick={swapLanguages} aria-label="Swap languages">
-              ⇅
+            <button className="swap-control" type="button" onClick={swapLanguages} aria-label="Swap languages">
+              <SwapIcon />
             </button>
 
-            <label>
-              <span>Target language</span>
-              <select value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value as LanguageCode)}>
-                {languageOptions.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="language-picker">
+              <button className="language-pill" type="button" onClick={() => openLanguageMenu('target')}>
+                <span className="pill-label">{targetLanguageMeta?.label ?? 'Select language'}</span>
+                <span className="pill-script">{targetLanguageMeta?.script ?? 'script'}</span>
+              </button>
+              {languageMenuOpen === 'target' ? (
+                <div className="language-menu">
+                  {languages.map((language) => (
+                    <button key={language.code} className={language.code === targetLanguage ? 'language-menu-item active' : 'language-menu-item'} type="button" onClick={() => selectLanguage(language.code)}>
+                      <span>{language.label}</span>
+                      <small>{language.script}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          <label className="textarea-field">
-            <span>Text to translate</span>
+          <div className="candidates-stepper-row">
+            <span>Candidates</span>
+            <div className="stepper" aria-label="Maximum candidates">
+              <button type="button" onClick={() => setMaxCandidates((current) => Math.max(1, current - 1))} aria-label="Decrease candidates">
+                −
+              </button>
+              <span>{maxCandidates}</span>
+              <button type="button" onClick={() => setMaxCandidates((current) => Math.min(5, current + 1))} aria-label="Increase candidates">
+                +
+              </button>
+            </div>
+          </div>
+
+          <label className="field-label">
+            <span>Text</span>
             <textarea
+              className="input-field"
               value={text}
               onChange={(event) => setText(event.target.value)}
-              placeholder="Type a sentence or paragraph here..."
-              rows={8}
+              placeholder="Type or paste text here"
+              rows={10}
             />
           </label>
 
-          {error ? <div className="error-banner">{error}</div> : null}
-
-          <div className="action-row">
-            <button className="primary-button" type="button" onClick={translateText} disabled={loading || text.trim().length === 0}>
-              {loading ? 'Translating...' : 'Translate text'}
+          <div className="input-footer">
+            <div className="word-count">
+              <span>{wordCount} words</span>
+              {characterCount > 500 ? <span>{characterCount} chars</span> : null}
+            </div>
+            <button className="translate-button" type="button" onClick={translateText} disabled={loading || text.trim().length === 0 || !sourceLanguage || !targetLanguage}>
+              {loading ? (
+                <>
+                  <SpinnerIcon />
+                  <span>Translating…</span>
+                </>
+              ) : (
+                <span>Translate</span>
+              )}
             </button>
-            <div className="hint">
-              Current pair: {selectedLanguages[sourceLanguage]} to {selectedLanguages[targetLanguage]}
-            </div>
-          </div>
-        </div>
-
-        <div className="panel output glass">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Result</span>
-              <h2>Best candidate and diagnostics</h2>
-            </div>
-            {response ? <span className={response.retry_used ? 'badge warning' : 'badge success'}>{response.retry_used ? 'Retry used' : 'Direct select'}</span> : null}
           </div>
 
-          {response ? (
-            <>
-              <div className="selected-card">
-                <div className="selected-top">
-                  <div>
-                    <span>{response.pair_label}</span>
-                    <strong>{response.selected_candidate.strategy}</strong>
-                  </div>
-                  <div className="score-pill">{Math.round(response.selected_candidate.score * 100)} / 100</div>
-                </div>
-                <p>{response.selected_candidate.text}</p>
-                <div className="meta-grid">
-                  <div>
+          {error ? <p className="error-line">{error}</p> : null}
+        </article>
+
+        <article className="panel panel-output">
+          <div className="panel-head">
+            <span className="panel-title">Output</span>
+            {response ? <span className="retry-note">{response.retry_used ? 'retry used' : 'direct select'}</span> : null}
+          </div>
+
+          <div className={response ? 'output-body output-filled' : 'output-body output-empty'}>
+            {response ? (
+              <>
+                <div className="pair-label">{response.pair_label}</div>
+                <p className="translated-text">{response.selected_candidate.text}</p>
+
+                <div className="score-row">
+                  <span className="score-item">
+                    <span>Punctuation</span>
+                    <code>{response.selected_candidate.breakdown.punctuation.toFixed(2)}</code>
+                  </span>
+                  <span className="score-item">
+                    <span>Entities</span>
+                    <code>{response.selected_candidate.breakdown.entities.toFixed(2)}</code>
+                  </span>
+                  <span className="score-item">
+                    <span>Length</span>
+                    <code>{response.selected_candidate.breakdown.length.toFixed(2)}</code>
+                  </span>
+                  <span className="score-item">
+                    <span>Script</span>
+                    <code>{response.selected_candidate.breakdown.target_script.toFixed(2)}</code>
+                  </span>
+                  <span className="score-item">
                     <span>Confidence</span>
-                    <strong>{Math.round(response.selected_candidate.confidence * 100)}%</strong>
-                  </div>
-                  <div>
-                    <span>Candidate ID</span>
-                    <strong>{response.selected_candidate.candidate_id}</strong>
-                  </div>
-                  <div>
-                    <span>Retry</span>
-                    <strong>{response.retry_used ? 'Yes' : 'No'}</strong>
-                  </div>
-                  <div>
-                    <span>Model status</span>
-                    <strong>{response.model_status}</strong>
-                  </div>
+                    <code>{response.selected_candidate.breakdown.confidence.toFixed(2)}</code>
+                  </span>
                 </div>
-              </div>
 
-              <div className="candidate-list">
-                {response.candidates.map((candidate) => (
-                  <article key={candidate.candidate_id} className={candidate.candidate_id === response.selected_candidate.candidate_id ? 'candidate-card active' : 'candidate-card'}>
-                    <div className="candidate-head">
-                      <strong>{candidate.strategy}</strong>
-                      <span>{Math.round(candidate.score * 100)} / 100</span>
-                    </div>
-                    <p>{candidate.text}</p>
-                    <div className="chip-row">
-                      <span>Confidence {Math.round(candidate.confidence * 100)}%</span>
-                      {candidate.notes.map((note) => (
-                        <span key={note}>{note}</span>
-                      ))}
-                    </div>
-                  </article>
-                ))}
-              </div>
+                <div className="diagnostics-line">
+                  {response.diagnostics.candidate_count} candidates evaluated · {response.diagnostics.selected_strategy} strategy selected · score {response.diagnostics.selected_total_score.toFixed(2)}
+                </div>
 
-              <div className="breakdown-grid">
-                <div className="mini-card">
-                  <span>Punctuation</span>
-                  <strong>{Math.round(response.selected_candidate.breakdown.punctuation * 100)}%</strong>
-                </div>
-                <div className="mini-card">
-                  <span>Entities</span>
-                  <strong>{Math.round(response.selected_candidate.breakdown.entities * 100)}%</strong>
-                </div>
-                <div className="mini-card">
-                  <span>Length</span>
-                  <strong>{Math.round(response.selected_candidate.breakdown.length * 100)}%</strong>
-                </div>
-                <div className="mini-card">
-                  <span>Target script</span>
-                  <strong>{Math.round(response.selected_candidate.breakdown.target_script * 100)}%</strong>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="empty-state">
-              <p>
-                Run a translation to see the selected candidate, all alternatives,
-                and the heuristic breakdown.
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
+                {response.retry_used ? <div className="retry-note-inline">Retry was used to improve this result</div> : null}
 
-      <section className="footer-note glass">
-        <div>
-          <span className="eyebrow">Architecture</span>
-          <p>
-            Model-only inference, candidate reranking, and clean API/UI
-            separation with deployment-ready structure.
-          </p>
-        </div>
+                <button className="candidate-toggle" type="button" onClick={() => setShowAllCandidates((current) => !current)}>
+                  {showAllCandidates ? 'Hide all candidates' : 'Show all candidates'}
+                </button>
+
+                {showAllCandidates ? (
+                  <div className="candidate-list">
+                    {response.candidates.map((candidate) => {
+                      const isActive = candidate.candidate_id === response.selected_candidate.candidate_id
+                      return (
+                        <div key={candidate.candidate_id} className={isActive ? 'candidate-row active' : 'candidate-row'}>
+                          <div className="candidate-top">
+                            <span>{candidate.strategy}</span>
+                            <span className="candidate-score">{candidate.score.toFixed(2)}</span>
+                          </div>
+                          <p className="candidate-text">{candidate.text}</p>
+                          <div className="candidate-notes">{candidate.notes.join(', ')}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="empty-state">Translation will appear here</div>
+            )}
+
+            {response ? (
+              <div className="output-actions">
+                <button type="button" className="action-icon" onClick={copyTranslation} aria-label="Copy translation">
+                  <CopyIcon />
+                </button>
+                <button type="button" className="action-icon" onClick={speakTranslation} aria-label="Speak translation">
+                  <SpeakIcon />
+                </button>
+                <button type="button" className="action-icon" onClick={shareTranslation} aria-label="Share translation">
+                  <ShareIcon />
+                </button>
+              </div>
+            ) : null}
+
+            {copied ? <div className="copy-toast">Copied</div> : null}
+          </div>
+        </article>
       </section>
     </main>
   )

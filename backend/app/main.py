@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,6 +9,12 @@ from .core.schemas import HealthResponse, TranslationRequest, TranslationRespons
 from .core.settings import settings
 from .core.language import LanguageRegistry
 from .services.pipeline import TranslationPipeline
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("backend.api")
 
 app = FastAPI(title=settings.app_name)
 
@@ -43,6 +51,14 @@ def translate(request: TranslationRequest) -> TranslationResponse:
     try:
         return pipeline.translate(request)
     except KeyError as exc:
+        logger.exception("Unsupported language requested")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
+        logger.exception("Translation failed during model inference")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled translation error")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Translation failed with unexpected error: {exc.__class__.__name__}",
+        ) from exc
